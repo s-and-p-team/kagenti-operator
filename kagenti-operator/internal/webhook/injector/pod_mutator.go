@@ -68,6 +68,11 @@ const (
 	// to the mandatory exclusion (8080). Example: "11434,4317"
 	OutboundPortsExcludeAnnotation = "kagenti.io/outbound-ports-exclude"
 	InboundPortsExcludeAnnotation  = "kagenti.io/inbound-ports-exclude"
+	// OutboundCapturePortsAnnotation lists ports to remove from the mandatory
+	// outbound exclusion list so Envoy captures that traffic. Use this to
+	// enable telemetry on A2A calls (port 8080) for agents that do not require
+	// Keycloak auth enforcement. Example: "8080"
+	OutboundCapturePortsAnnotation = "kagenti.io/outbound-capture-ports"
 
 	// KagentiTypeLabel is the label key that identifies the workload type
 	KagentiTypeLabel = "kagenti.io/type"
@@ -460,7 +465,8 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 		if decision.ProxyInit.Inject && !containerExists(podSpec.InitContainers, ProxyInitContainerName) {
 			outboundExclude := annotations[OutboundPortsExcludeAnnotation]
 			inboundExclude := annotations[InboundPortsExcludeAnnotation]
-			podSpec.InitContainers = append(podSpec.InitContainers, builder.BuildProxyInitContainer(outboundExclude, inboundExclude))
+			outboundCapture := annotations[OutboundCapturePortsAnnotation]
+			podSpec.InitContainers = append(podSpec.InitContainers, builder.BuildProxyInitContainer(outboundExclude, inboundExclude, outboundCapture))
 		}
 	} else {
 		// Legacy mode: separate sidecar containers
@@ -471,7 +477,8 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 		if decision.ProxyInit.Inject && !containerExists(podSpec.InitContainers, ProxyInitContainerName) {
 			outboundExclude := annotations[OutboundPortsExcludeAnnotation]
 			inboundExclude := annotations[InboundPortsExcludeAnnotation]
-			podSpec.InitContainers = append(podSpec.InitContainers, builder.BuildProxyInitContainer(outboundExclude, inboundExclude))
+			outboundCapture := annotations[OutboundCapturePortsAnnotation]
+			podSpec.InitContainers = append(podSpec.InitContainers, builder.BuildProxyInitContainer(outboundExclude, inboundExclude, outboundCapture))
 		}
 
 		if decision.SpiffeHelper.Inject && !containerExists(podSpec.Containers, SpiffeHelperContainerName) {
