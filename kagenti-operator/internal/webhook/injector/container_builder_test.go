@@ -138,57 +138,94 @@ func TestBuildEnvoyProxyContainer_HasKeycloakURLAndRealm(t *testing.T) {
 }
 
 func TestBuildOutboundExcludeValue_Empty(t *testing.T) {
-	got := buildOutboundExcludeValue("")
+	got := buildOutboundExcludeValue("", "")
 	if got != "8080" {
-		t.Errorf("buildOutboundExcludeValue(\"\") = %q, want %q", got, "8080")
+		t.Errorf("buildOutboundExcludeValue(\"\", \"\") = %q, want %q", got, "8080")
 	}
 }
 
 func TestBuildOutboundExcludeValue_SinglePort(t *testing.T) {
-	got := buildOutboundExcludeValue("11434")
+	got := buildOutboundExcludeValue("11434", "")
 	if got != "8080,11434" {
-		t.Errorf("buildOutboundExcludeValue(\"11434\") = %q, want %q", got, "8080,11434")
+		t.Errorf("buildOutboundExcludeValue(\"11434\", \"\") = %q, want %q", got, "8080,11434")
 	}
 }
 
 func TestBuildOutboundExcludeValue_MultiplePorts(t *testing.T) {
-	got := buildOutboundExcludeValue("11434,4317")
+	got := buildOutboundExcludeValue("11434,4317", "")
 	if got != "8080,11434,4317" {
-		t.Errorf("buildOutboundExcludeValue(\"11434,4317\") = %q, want %q", got, "8080,11434,4317")
+		t.Errorf("buildOutboundExcludeValue(\"11434,4317\", \"\") = %q, want %q", got, "8080,11434,4317")
 	}
 }
 
 func TestBuildOutboundExcludeValue_Deduplicates8080(t *testing.T) {
-	got := buildOutboundExcludeValue("8080,11434")
+	got := buildOutboundExcludeValue("8080,11434", "")
 	if got != "8080,11434" {
-		t.Errorf("buildOutboundExcludeValue(\"8080,11434\") = %q, want %q", got, "8080,11434")
+		t.Errorf("buildOutboundExcludeValue(\"8080,11434\", \"\") = %q, want %q", got, "8080,11434")
 	}
 }
 
 func TestBuildOutboundExcludeValue_TrimsWhitespace(t *testing.T) {
-	got := buildOutboundExcludeValue(" 11434 , 4317 ")
+	got := buildOutboundExcludeValue(" 11434 , 4317 ", "")
 	if got != "8080,11434,4317" {
-		t.Errorf("buildOutboundExcludeValue(\" 11434 , 4317 \") = %q, want %q", got, "8080,11434,4317")
+		t.Errorf("buildOutboundExcludeValue(\" 11434 , 4317 \", \"\") = %q, want %q", got, "8080,11434,4317")
 	}
 }
 
 func TestBuildOutboundExcludeValue_DropsInvalidTokens(t *testing.T) {
-	got := buildOutboundExcludeValue("11434,abc,0,65536,-1,,99999")
+	got := buildOutboundExcludeValue("11434,abc,0,65536,-1,,99999", "")
 	if got != "8080,11434" {
 		t.Errorf("buildOutboundExcludeValue with invalid tokens = %q, want %q", got, "8080,11434")
 	}
 }
 
 func TestBuildOutboundExcludeValue_BoundaryPorts(t *testing.T) {
-	got := buildOutboundExcludeValue("1,65535")
+	got := buildOutboundExcludeValue("1,65535", "")
 	if got != "8080,1,65535" {
-		t.Errorf("buildOutboundExcludeValue(\"1,65535\") = %q, want %q", got, "8080,1,65535")
+		t.Errorf("buildOutboundExcludeValue(\"1,65535\", \"\") = %q, want %q", got, "8080,1,65535")
+	}
+}
+
+// capture tests — kagenti.io/outbound-capture-ports annotation
+
+func TestBuildOutboundExcludeValue_Capture8080RemovesMandatory(t *testing.T) {
+	got := buildOutboundExcludeValue("", "8080")
+	if got != "" {
+		t.Errorf("capture 8080 with no extra = %q, want %q", got, "")
+	}
+}
+
+func TestBuildOutboundExcludeValue_Capture8080WithExtraPorts(t *testing.T) {
+	got := buildOutboundExcludeValue("11434", "8080")
+	if got != "11434" {
+		t.Errorf("capture 8080 + extra 11434 = %q, want %q", got, "11434")
+	}
+}
+
+func TestBuildOutboundExcludeValue_CaptureNonMandatoryPortNoEffect(t *testing.T) {
+	got := buildOutboundExcludeValue("11434", "9000")
+	if got != "8080,11434" {
+		t.Errorf("capture unrelated port = %q, want %q", got, "8080,11434")
+	}
+}
+
+func TestBuildOutboundExcludeValue_CaptureIgnoresInvalidTokens(t *testing.T) {
+	got := buildOutboundExcludeValue("", "abc,8080,0")
+	if got != "" {
+		t.Errorf("capture with invalid tokens = %q, want %q", got, "")
+	}
+}
+
+func TestBuildOutboundExcludeValue_CaptureTrimsWhitespace(t *testing.T) {
+	got := buildOutboundExcludeValue("", " 8080 ")
+	if got != "" {
+		t.Errorf("capture with whitespace = %q, want %q", got, "")
 	}
 }
 
 func TestBuildProxyInitContainer_DefaultExclude(t *testing.T) {
 	builder := NewContainerBuilder(config.CompiledDefaults())
-	container := builder.BuildProxyInitContainer("", "")
+	container := builder.BuildProxyInitContainer("", "", "")
 
 	var foundOutbound bool
 	for _, env := range container.Env {
@@ -209,7 +246,7 @@ func TestBuildProxyInitContainer_DefaultExclude(t *testing.T) {
 
 func TestBuildProxyInitContainer_WithAnnotationPorts(t *testing.T) {
 	builder := NewContainerBuilder(config.CompiledDefaults())
-	container := builder.BuildProxyInitContainer("11434,4317", "")
+	container := builder.BuildProxyInitContainer("11434,4317", "", "")
 
 	var foundOutbound bool
 	for _, env := range container.Env {
@@ -230,7 +267,7 @@ func TestBuildProxyInitContainer_WithAnnotationPorts(t *testing.T) {
 
 func TestBuildProxyInitContainer_WithInboundExclude(t *testing.T) {
 	builder := NewContainerBuilder(config.CompiledDefaults())
-	container := builder.BuildProxyInitContainer("", "8443,18789")
+	container := builder.BuildProxyInitContainer("", "8443,18789", "")
 
 	var foundInbound bool
 	for _, env := range container.Env {
@@ -251,7 +288,7 @@ func TestBuildProxyInitContainer_WithInboundExclude(t *testing.T) {
 
 func TestBuildProxyInitContainer_WithBothExcludes(t *testing.T) {
 	builder := NewContainerBuilder(config.CompiledDefaults())
-	container := builder.BuildProxyInitContainer("11434", "8443")
+	container := builder.BuildProxyInitContainer("11434", "8443", "")
 
 	var foundOutbound, foundInbound bool
 	for _, env := range container.Env {
@@ -274,6 +311,51 @@ func TestBuildProxyInitContainer_WithBothExcludes(t *testing.T) {
 	if !foundInbound {
 		t.Error("missing INBOUND_PORTS_EXCLUDE")
 	}
+}
+
+func TestBuildProxyInitContainer_Capture8080(t *testing.T) {
+	builder := NewContainerBuilder(config.CompiledDefaults())
+	container := builder.BuildProxyInitContainer("", "", "8080")
+
+	for _, env := range container.Env {
+		if env.Name == "OUTBOUND_PORTS_EXCLUDE" {
+			if env.Value != "" {
+				t.Errorf("OUTBOUND_PORTS_EXCLUDE = %q, want empty (8080 captured)", env.Value)
+			}
+			return
+		}
+	}
+	t.Error("proxy-init container missing OUTBOUND_PORTS_EXCLUDE env var")
+}
+
+func TestBuildProxyInitContainer_Capture8080WithExtraPorts(t *testing.T) {
+	builder := NewContainerBuilder(config.CompiledDefaults())
+	container := builder.BuildProxyInitContainer("11434", "", "8080")
+
+	for _, env := range container.Env {
+		if env.Name == "OUTBOUND_PORTS_EXCLUDE" {
+			if env.Value != "11434" {
+				t.Errorf("OUTBOUND_PORTS_EXCLUDE = %q, want %q", env.Value, "11434")
+			}
+			return
+		}
+	}
+	t.Error("proxy-init container missing OUTBOUND_PORTS_EXCLUDE env var")
+}
+
+func TestBuildProxyInitContainer_CaptureUnrelatedPortNoEffect(t *testing.T) {
+	builder := NewContainerBuilder(config.CompiledDefaults())
+	container := builder.BuildProxyInitContainer("", "", "9000")
+
+	for _, env := range container.Env {
+		if env.Name == "OUTBOUND_PORTS_EXCLUDE" {
+			if env.Value != "8080" {
+				t.Errorf("OUTBOUND_PORTS_EXCLUDE = %q, want %q (unrelated capture port should not affect 8080 exclusion)", env.Value, "8080")
+			}
+			return
+		}
+	}
+	t.Error("proxy-init container missing OUTBOUND_PORTS_EXCLUDE env var")
 }
 
 func TestBuildPortExcludeValue(t *testing.T) {

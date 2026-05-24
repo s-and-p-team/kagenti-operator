@@ -436,18 +436,21 @@ func (b *ContainerBuilder) buildEnvoyProxyEnvLegacy() []corev1.EnvVar {
 //   - The container image should be regularly updated and scanned for vulnerabilities
 //
 // mandatoryOutboundExclude is always prepended so that Keycloak traffic
-// (port 8080) is never intercepted by Envoy.
+// (port 8080) is never intercepted by Envoy, unless the pod opts in via
+// kagenti.io/outbound-capture-ports to explicitly capture that port.
 const mandatoryOutboundExclude = "8080"
 
 // BuildProxyInitContainer creates the proxy-init container.
 // outboundPortsExclude is a comma-separated list of additional ports to
-// exclude from outbound interception (mandatory 8080 is always included).
+// exclude from outbound interception (mandatory 8080 is always included
+// unless listed in outboundCapturePorts).
 // inboundPortsExclude is a comma-separated list of ports to exclude from
-// inbound interception (only set when non-empty). Both come from the
-// kagenti.io/outbound-ports-exclude and kagenti.io/inbound-ports-exclude
-// pod annotations.
-func (b *ContainerBuilder) BuildProxyInitContainer(outboundPortsExclude, inboundPortsExclude string) corev1.Container {
-	outboundValue := buildOutboundExcludeValue(outboundPortsExclude)
+// inbound interception (only set when non-empty).
+// outboundCapturePorts is a comma-separated list of ports to remove from
+// the mandatory exclusion so Envoy captures that traffic. All three come
+// from the corresponding kagenti.io/ pod annotations.
+func (b *ContainerBuilder) BuildProxyInitContainer(outboundPortsExclude, inboundPortsExclude, outboundCapturePorts string) corev1.Container {
+	outboundValue := buildOutboundExcludeValue(outboundPortsExclude, outboundCapturePorts)
 	inboundValue := buildPortExcludeValue(inboundPortsExclude, "inbound-ports-exclude")
 
 	builderLog.Info("building ProxyInit Container",
@@ -539,11 +542,32 @@ func validateAndDeduplicatePorts(raw, annotationName string, initialPorts []stri
 // buildOutboundExcludeValue merges the mandatory 8080 with validated
 // user-supplied ports. Invalid tokens (non-numeric, out of range) are
 // silently dropped and logged. Duplicates of 8080 are removed.
-func buildOutboundExcludeValue(extra string) string {
-	if extra == "" {
-		return mandatoryOutboundExclude
+// capture lists ports to remove from the mandatory exclusion (e.g. "8080"
+// opts a pod into outbound Keycloak auth call capture).
+func buildOutboundExcludeValue(extra, capture string) string {
+	// Build set of explicitly captured ports so we can skip the mandatory exclusion.
+	captureSet := map[string]bool{}
+	for _, tok := range strings.Split(capture, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if p, err := strconv.Atoi(tok); err == nil && p >= 1 && p <= 65535 {
+			captureSet[strconv.Itoa(p)] = true
+		}
 	}
-	return strings.Join(validateAndDeduplicatePorts(extra, "outbound-ports-exclude", []string{mandatoryOutboundExclude}), ",")
+
+	var initial []string
+	if !captureSet[mandatoryOutboundExclude] {
+		initial = []string{mandatoryOutboundExclude}
+	}
+	if extra == "" {
+		if len(initial) == 0 {
+			return ""
+		}
+		return strings.Join(initial, ",")
+	}
+	return strings.Join(validateAndDeduplicatePorts(extra, "outbound-ports-exclude", initial), ",")
 }
 
 // buildPortExcludeValue validates and deduplicates a comma-separated port
